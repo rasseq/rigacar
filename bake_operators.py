@@ -127,21 +127,6 @@ def create_property_animation(context, property_name):
     return fcurves.new(fcurve_datapath, index=0, action_group='Wheels rotation') if fcurves is not None else None
 
 
-def set_bone_selected(bone, state):
-    if hasattr(bone, 'select'):
-        bone.select = state
-    elif hasattr(bone, 'select_set'):
-        bone.select_set(state)
-
-
-def is_bone_selected(bone):
-    if hasattr(bone, 'select'):
-        return bone.select
-    if hasattr(bone, 'select_get'):
-        return bone.select_get()
-    return False
-
-
 class FCurvesEvaluator(object):
     """Encapsulates a bunch of FCurves for vector animations."""
 
