@@ -25,6 +25,39 @@ import itertools
 import re
 
 
+def get_action_fcurves(action, animated_object, ensure=False):
+    """
+    Return an F-Curve collection for both legacy and slotted actions.
+    """
+    if action is None:
+        return None
+
+    if hasattr(action, 'fcurves'):
+        return action.fcurves
+
+    try:
+        from bpy_extras import anim_utils
+    except Exception:
+        return None
+
+    animation_data = animated_object.animation_data if animated_object else None
+    action_slot = getattr(animation_data, 'action_slot', None) if animation_data else None
+    if action_slot is None and hasattr(action, 'slots') and action.slots:
+        action_slot = action.slots.active or action.slots[0]
+    if action_slot is None:
+        return None
+
+    channelbag = None
+    if ensure and hasattr(anim_utils, 'action_ensure_channelbag_for_slot'):
+        channelbag = anim_utils.action_ensure_channelbag_for_slot(action, action_slot)
+    elif hasattr(anim_utils, 'action_get_channelbag_for_slot'):
+        channelbag = anim_utils.action_get_channelbag_for_slot(action, action_slot)
+    elif hasattr(action, 'fcurve_ensure_for_datablock'):
+        channelbag = action.fcurve_ensure_for_datablock(animated_object)
+
+    return channelbag.fcurves if channelbag is not None else None
+
+
 def cursor(cursor_mode):
     def cursor_decorator(func):
         def wrapper(self, context, *args, **kwargs):
@@ -77,16 +110,57 @@ def clear_property_animation(context, property_name, remove_keyframes=True):
     if remove_keyframes and context.object.animation_data and context.object.animation_data.action:
         fcurve_datapath = '["%s"]' % property_name
         action = context.object.animation_data.action
-        fcurve = action.fcurves.find(fcurve_datapath)
+        fcurves = get_action_fcurves(action, context.object)
+        if fcurves is None:
+            context.object[property_name] = .0
+            return
+        fcurve = fcurves.find(fcurve_datapath)
         if fcurve is not None:
-            action.fcurves.remove(fcurve)
+            fcurves.remove(fcurve)
     context.object[property_name] = .0
 
 
 def create_property_animation(context, property_name):
     action = context.object.animation_data.action
     fcurve_datapath = '["%s"]' % property_name
-    return action.fcurves.new(fcurve_datapath, index=0, action_group='Wheels rotation')
+    fcurves = get_action_fcurves(action, context.object, ensure=True)
+    return fcurves.new(fcurve_datapath, index=0, action_group='Wheels rotation') if fcurves is not None else None
+
+
+def insert_property_keyframe(context, property_name, frame, value, keyframe_type='JITTER', interpolation='LINEAR'):
+    datapath = '["%s"]' % property_name
+    context.object[property_name] = value
+    context.object.keyframe_insert(data_path=datapath, frame=frame, group='Wheels rotation')
+
+    action = context.object.animation_data.action if context.object.animation_data else None
+    fcurves = get_action_fcurves(action, context.object) if action is not None else None
+    if fcurves is None:
+        return
+
+    fcurve = fcurves.find(datapath, index=0)
+    if fcurve is None:
+        return
+
+    for keyframe in reversed(fcurve.keyframe_points):
+        if abs(keyframe.co[0] - frame) < .0001:
+            keyframe.type = keyframe_type
+            keyframe.interpolation = interpolation
+            break
+
+
+def set_bone_selected(bone, state):
+    if hasattr(bone, 'select'):
+        bone.select = state
+    elif hasattr(bone, 'select_set'):
+        bone.select_set(state)
+
+
+def is_bone_selected(bone):
+    if hasattr(bone, 'select'):
+        return bone.select
+    if hasattr(bone, 'select_get'):
+        return bone.select_get()
+    return False
 
 
 class FCurvesEvaluator(object):
@@ -174,39 +248,44 @@ class BakingOperator(object):
 
     def _create_euler_evaluator(self, action, source_bone):
         fcurve_name = 'pose.bones["%s"].rotation_euler' % source_bone.name
-        fc_root_rot = [action.fcurves.find(fcurve_name, index=i) for i in range(3)]
+        fcurves = get_action_fcurves(action, self._animated_object)
+        fc_root_rot = [fcurves.find(fcurve_name, index=i) if fcurves is not None else None for i in range(3)]
         return EulerToQuaternionFCurvesEvaluator(FCurvesEvaluator(fc_root_rot, default_value=(.0, .0, .0)))
 
     def _create_quaternion_evaluator(self, action, source_bone):
         fcurve_name = 'pose.bones["%s"].rotation_quaternion' % source_bone.name
-        fc_root_rot = [action.fcurves.find(fcurve_name, index=i) for i in range(4)]
+        fcurves = get_action_fcurves(action, self._animated_object)
+        fc_root_rot = [fcurves.find(fcurve_name, index=i) if fcurves is not None else None for i in range(4)]
         return QuaternionFCurvesEvaluator(FCurvesEvaluator(fc_root_rot, default_value=(1.0, .0, .0, .0)))
 
     def _create_location_evaluator(self, action, source_bone):
         fcurve_name = 'pose.bones["%s"].location' % source_bone.name
-        fc_root_loc = [action.fcurves.find(fcurve_name, index=i) for i in range(3)]
+        fcurves = get_action_fcurves(action, self._animated_object)
+        fc_root_loc = [fcurves.find(fcurve_name, index=i) if fcurves is not None else None for i in range(3)]
         return VectorFCurvesEvaluator(FCurvesEvaluator(fc_root_loc, default_value=(.0, .0, .0)))
 
     def _create_scale_evaluator(self, action, source_bone):
         fcurve_name = 'pose.bones["%s"].scale' % source_bone.name
-        fc_root_loc = [action.fcurves.find(fcurve_name, index=i) for i in range(3)]
+        fcurves = get_action_fcurves(action, self._animated_object)
+        fc_root_loc = [fcurves.find(fcurve_name, index=i) if fcurves is not None else None for i in range(3)]
         return VectorFCurvesEvaluator(FCurvesEvaluator(fc_root_loc, default_value=(1.0, 1.0, 1.0)))
 
     def _bake_action(self, context, *source_bones):
+        self._animated_object = context.object
         action = context.object.animation_data.action
         nla_tweak_mode = context.object.animation_data.use_tweak_mode if hasattr(context.object.animation_data, 'use_tweak_mode') else False
 
         # saving context
-        selected_bones = [b for b in context.object.data.bones if b.select]
+        selected_bones = [b for b in context.object.data.bones if is_bone_selected(b)]
         mode = context.object.mode
         for b in selected_bones:
-            b.select = False
+            set_bone_selected(b, False)
 
         bpy.ops.object.mode_set(mode='OBJECT')
         source_bones_matrix_basis = []
         for source_bone in source_bones:
             source_bones_matrix_basis.append(context.object.pose.bones[source_bone.name].matrix_basis.copy())
-            source_bone.select = True
+            set_bone_selected(source_bone, True)
 
         # Blender 2.81 : Another hack for another bug in the bake operator
         # removing from the selection objects which are not the current one
@@ -220,9 +299,9 @@ class BakingOperator(object):
         # restoring context
         for source_bone, matrix_basis in zip(source_bones, source_bones_matrix_basis):
             context.object.pose.bones[source_bone.name].matrix_basis = matrix_basis
-            source_bone.select = False
+            set_bone_selected(source_bone, False)
         for b in selected_bones:
-            b.select = True
+            set_bone_selected(b, True)
 
         bpy.ops.object.mode_set(mode=mode)
 
@@ -300,12 +379,10 @@ class ANIM_OT_carWheelsRotationBake(bpy.types.Operator, BakingOperator):
         yield self.frame_end, distance
 
     def _bake_wheel_rotation(self, context, baked_action, bone, brake_bone):
-        fc_rot = create_property_animation(context, bone.name.replace('MCH-', ''))
+        property_name = bone.name.replace('MCH-', '')
 
         for f, distance in self._evaluate_distance_per_frame(baked_action, bone, brake_bone):
-            kf = fc_rot.keyframe_points.insert(f, distance)
-            kf.interpolation = 'LINEAR'
-            kf.type = 'JITTER'
+            insert_property_keyframe(context, property_name, f, distance)
 
 
 class ANIM_OT_carSteeringBake(bpy.types.Operator, BakingOperator):
@@ -376,14 +453,11 @@ class ANIM_OT_carSteeringBake(bpy.types.Operator, BakingOperator):
     def _bake_steering_rotation(self, context, bone_offset, bone):
         clear_property_animation(context, 'Steering.rotation')
         fix_old_steering_rotation(context.object)
-        fc_rot = create_property_animation(context, 'Steering.rotation')
         action = self._bake_action(context, bone)
 
         try:
             for f, steering_pos in self._evaluate_rotation_per_frame(action, bone_offset, bone):
-                kf = fc_rot.keyframe_points.insert(f, steering_pos)
-                kf.type = 'JITTER'
-                kf.interpolation = 'LINEAR'
+                insert_property_keyframe(context, 'Steering.rotation', f, steering_pos)
         finally:
             bpy.data.actions.remove(action)
 
