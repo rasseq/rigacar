@@ -53,7 +53,8 @@ def create_constraint_influence_driver(ob, cns, driver_data_path, base_influence
     targ.data_path = driver_data_path
 
     if base_influence != 1.0:
-        fmod = fcurve.modifiers[0]
+        # Blender 5.x may create a driver FCurve without any default modifier.
+        fmod = fcurve.modifiers[0] if fcurve.modifiers else fcurve.modifiers.new(type='GENERATOR')
         fmod.mode = 'POLYNOMIAL'
         fmod.poly_order = 1
         fmod.coefficients = (0, base_influence)
