@@ -66,12 +66,19 @@ class RIGACAR_PT_mixin:
         self.layout.use_property_decorate = False
 
     @classmethod
+    def is_armature_object(cls, context):
+        return context.object is not None and context.object.type == 'ARMATURE' and context.object.data is not None
+
+    @classmethod
     def is_car_rig(cls, context):
-        return context.object is not None and context.object.data is not None and 'Car Rig' in context.object.data
+        return cls.is_armature_object(context) and 'Car Rig' in context.object.data
 
     @classmethod
     def is_car_rig_generated(cls, context):
         return cls.is_car_rig(context) and context.object.data['Car Rig']
+
+    def display_create_deformation_section(self, context):
+        self.layout.operator(car_rig.OBJECT_OT_armatureCarDeformationRig.bl_idname, text='Create deformation rig')
 
     def display_generate_section(self, context):
         self.layout.operator(car_rig.POSE_OT_carAnimationRigGenerate.bl_idname, text='Generate')
@@ -149,13 +156,15 @@ class RIGACAR_PT_animationRigView(bpy.types.Panel, RIGACAR_PT_mixin):
 
     @classmethod
     def poll(cls, context):
-        return RIGACAR_PT_mixin.is_car_rig(context)
+        return context.mode in {'OBJECT', 'POSE', 'EDIT_ARMATURE'}
 
     def draw(self, context):
         if RIGACAR_PT_mixin.is_car_rig_generated(context):
             self.display_rig_props_section(context)
-        else:
+        elif RIGACAR_PT_mixin.is_car_rig(context):
             self.display_generate_section(context)
+        else:
+            self.display_create_deformation_section(context)
 
 
 class RIGACAR_PT_wheelsAnimationView(bpy.types.Panel, RIGACAR_PT_mixin):
