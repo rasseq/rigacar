@@ -88,6 +88,10 @@ def create_translation_x_driver(ob, bone, driver_data_path):
 
 
 def create_bone_group(pose, group_name, color_set, bone_names):
+    """Create a legacy bone group when available (Blender < 4), otherwise no-op."""
+    if not hasattr(pose, 'bone_groups'):
+        return
+
     group = pose.bone_groups.new(name=group_name)
     group.color_set = color_set
     for bone_name in bone_names:
@@ -117,33 +121,41 @@ def define_custom_property(target, name, value, description=None, overridable=Tr
 
 
 def dispatch_bones_to_armature_layers(ob):
-    re_mch_bone = re.compile(r'^MCH-Wheel(Brake)?\.(Ft|Bk)\.[LR](\.\d+)?$')
-    default_visible_layers = [False] * 32
+    # Bone layers were removed in Blender 4.0 in favor of bone collections.
+    # Keep legacy behavior on old versions and gracefully no-op on recent versions.
+    first_bone = next(iter(ob.data.bones), None)
+    has_legacy_layers = hasattr(ob.data, 'layers') and first_bone is not None and hasattr(first_bone, 'layers')
 
-    for b in ob.data.bones:
-        layers = [False] * 32
-        if b.name.startswith('DEF-'):
-            layers[DEF_BONE_LAYER] = True
-        elif b.name.startswith('MCH-'):
-            layers[MCH_BONE_LAYER] = True
-            if b.name in ('MCH-Body', 'MCH-Steering') or re_mch_bone.match(b.name):
-                layers[MCH_BONE_EXTENSION_LAYER] = True
-        else:
-            layer_num = ob.pose.bones[b.name].bone_group_index
-            layers[layer_num] = True
-            default_visible_layers[layer_num] = True
-        b.layers = layers
+    if has_legacy_layers:
+        re_mch_bone = re.compile(r'^MCH-Wheel(Brake)?\.(Ft|Bk)\.[LR](\.\d+)?$')
+        default_visible_layers = [False] * 32
 
-    ob.data.layers = default_visible_layers
+        for b in ob.data.bones:
+            layers = [False] * 32
+            if b.name.startswith('DEF-'):
+                layers[DEF_BONE_LAYER] = True
+            elif b.name.startswith('MCH-'):
+                layers[MCH_BONE_LAYER] = True
+                if b.name in ('MCH-Body', 'MCH-Steering') or re_mch_bone.match(b.name):
+                    layers[MCH_BONE_EXTENSION_LAYER] = True
+            else:
+                layer_num = ob.pose.bones[b.name].bone_group_index if hasattr(ob.pose, 'bone_groups') else 0
+                layers[layer_num] = True
+                default_visible_layers[layer_num] = True
+            b.layers = layers
 
-    shape_bone_layers = [False] * 32
-    shape_bone_layers[CUSTOM_SHAPE_LAYER] = True
+        ob.data.layers = default_visible_layers
+
+        shape_bone_layers = [False] * 32
+        shape_bone_layers[CUSTOM_SHAPE_LAYER] = True
+
     for b in ob.pose.bones:
         if b.custom_shape:
             if b.custom_shape_transform:
                 ob.pose.bones[b.custom_shape_transform.name].custom_shape = b.custom_shape
-                ob.data.bones[b.custom_shape_transform.name].layers = shape_bone_layers
-            else:
+                if has_legacy_layers:
+                    ob.data.bones[b.custom_shape_transform.name].layers = shape_bone_layers
+            elif has_legacy_layers:
                 ob.data.bones[b.name].layers[CUSTOM_SHAPE_LAYER] = True
 
 
@@ -435,8 +447,10 @@ def generate_constraint_on_wheel_brake_bone(wheel_brake_pose_bone, wheel_pose_bo
     wheel_brake_pose_bone.lock_scale = (True, False, False)
     wheel_brake_pose_bone.custom_shape = get_widget('WGT-CarRig.WheelBrake')
     wheel_brake_pose_bone.bone.show_wire = True
-    wheel_brake_pose_bone.bone_group = wheel_pose_bone.bone_group
-    wheel_brake_pose_bone.bone.layers = wheel_pose_bone.bone.layers
+    if hasattr(wheel_brake_pose_bone, 'bone_group'):
+        wheel_brake_pose_bone.bone_group = wheel_pose_bone.bone_group
+    if hasattr(wheel_brake_pose_bone.bone, 'layers'):
+        wheel_brake_pose_bone.bone.layers = wheel_pose_bone.bone.layers
 
     cns = wheel_brake_pose_bone.constraints.new('LIMIT_SCALE')
     cns.name = 'Brakes'
