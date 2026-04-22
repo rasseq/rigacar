@@ -127,6 +127,7 @@ def create_property_animation(context, property_name):
     return fcurves.new(fcurve_datapath, index=0, action_group='Wheels rotation') if fcurves is not None else None
 
 
+
 def insert_property_keyframe(context, property_name, frame, value, keyframe_type='JITTER', interpolation='LINEAR'):
     datapath = '["%s"]' % property_name
     context.object[property_name] = value
@@ -161,6 +162,7 @@ def is_bone_selected(bone):
     if hasattr(bone, 'select_get'):
         return bone.select_get()
     return False
+
 
 
 class FCurvesEvaluator(object):
@@ -379,7 +381,13 @@ class ANIM_OT_carWheelsRotationBake(bpy.types.Operator, BakingOperator):
         yield self.frame_end, distance
 
     def _bake_wheel_rotation(self, context, baked_action, bone, brake_bone):
+
         property_name = bone.name.replace('MCH-', '')
+
+        fc_rot = create_property_animation(context, bone.name.replace('MCH-', ''))
+        if fc_rot is None:
+            return
+
 
         for f, distance in self._evaluate_distance_per_frame(baked_action, bone, brake_bone):
             insert_property_keyframe(context, property_name, f, distance)
@@ -453,6 +461,13 @@ class ANIM_OT_carSteeringBake(bpy.types.Operator, BakingOperator):
     def _bake_steering_rotation(self, context, bone_offset, bone):
         clear_property_animation(context, 'Steering.rotation')
         fix_old_steering_rotation(context.object)
+
+
+        fc_rot = create_property_animation(context, 'Steering.rotation')
+        if fc_rot is None:
+            self.report({'ERROR'}, 'Cannot create steering animation channels for this action type')
+            return
+
         action = self._bake_action(context, bone)
 
         try:
