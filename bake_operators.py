@@ -240,16 +240,16 @@ class BakingOperator(object):
         nla_tweak_mode = context.object.animation_data.use_tweak_mode if hasattr(context.object.animation_data, 'use_tweak_mode') else False
 
         # saving context
-        selected_bones = [b for b in context.object.data.bones if b.select]
+        selected_bones = [b for b in context.object.data.bones if is_bone_selected(b)]
         mode = context.object.mode
         for b in selected_bones:
-            b.select = False
+            set_bone_selected(b, False)
 
         bpy.ops.object.mode_set(mode='OBJECT')
         source_bones_matrix_basis = []
         for source_bone in source_bones:
             source_bones_matrix_basis.append(context.object.pose.bones[source_bone.name].matrix_basis.copy())
-            source_bone.select = True
+            set_bone_selected(source_bone, True)
 
         # Blender 2.81 : Another hack for another bug in the bake operator
         # removing from the selection objects which are not the current one
@@ -263,9 +263,9 @@ class BakingOperator(object):
         # restoring context
         for source_bone, matrix_basis in zip(source_bones, source_bones_matrix_basis):
             context.object.pose.bones[source_bone.name].matrix_basis = matrix_basis
-            source_bone.select = False
+            set_bone_selected(source_bone, False)
         for b in selected_bones:
-            b.select = True
+            set_bone_selected(b, True)
 
         bpy.ops.object.mode_set(mode=mode)
 
